@@ -1,17 +1,30 @@
+import { useState } from 'react'
 import useAuthKit from '@/hooks/useAuthKit'
+import axios from 'axios';
+import CreateDeal from '@/components/CreateDeal';
+import useSafeWallet from '@/hooks/useSafeWallet';
 
 export default function Home() {
 
 	const  { safeAuth } = useAuthKit()
+    const { createSafeWallet } = useSafeWallet()
+    const [user, setUser] = useState<string>('')
 
-    async function handleRegister() {
+    async function handleSignIn() {
 		if (safeAuth) {
 			const response = await safeAuth.signIn();
 			console.log(response.eoa, response);
-			const r2 = await safeAuth.signOut();
-			console.log("r2", r2);
+            setUser(response.eoa);
+            const safeAddress = await createSafeWallet(safeAuth, [response.eoa])
+            console.log(safeAddress)
 		};
 	}
+
+    async function handleSignOut() {
+        if (safeAuth) {
+            await safeAuth.signOut();
+        };
+    }
 
     return (
         <>
@@ -19,9 +32,13 @@ export default function Home() {
             <button
                 onClick={() => {
                     console.log('clicked')
-					handleRegister()
+					handleSignIn()
                 }}
-            >Click me</button>
+            >Sign In</button>
+
+            {user && user.length ?
+                <CreateDeal enterprise={user} enterpriseEmail={user} />
+            : null}
         </>
     )
 }

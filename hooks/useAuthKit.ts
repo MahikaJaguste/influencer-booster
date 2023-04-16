@@ -13,7 +13,7 @@ const useAuthKit = () => {
     const options: Web3AuthOptions = {
         clientId: process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID || "",
         web3AuthNetwork: 'testnet',
-        chainConfig: { chainNamespace: "eip155", chainId: '0x5', rpcTarget: `https://goerli.infura.io/v3/${process.env.NEXT_PUBLIC_INFURA_PROJECT_ID}` },
+        chainConfig: { chainNamespace: "eip155", chainId: '0x13881', rpcTarget: `https://polygon-mumbai.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_PROJECT_ID}` },
     };
 
     const openloginAdapter = new OpenloginAdapter({ 
@@ -28,7 +28,7 @@ const useAuthKit = () => {
       (async () => {
         setLoading(true);
         const safeAuth = await SafeAuthKit.init(web3AuthAdapter, {
-            txServiceUrl: "https://safe-transaction-goerli.safe.global", // Optional. Only if want to retrieve related safes
+             // Optional. Only if want to retrieve related safes
         });
         setSafeAuth(safeAuth);
         setLoading(false);
