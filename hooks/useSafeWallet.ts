@@ -1,98 +1,48 @@
 import { ethers } from "ethers";
 import {
-  GaslessWallet,
-  GaslessWalletConfig,
-} from "@gelatonetwork/gasless-wallet";
-import {
     SafeAuthKit,
 } from "@safe-global/auth-kit";
-import { ExternalProvider } from "@ethersproject/providers";
 import EthersAdapter from "@safe-global/safe-ethers-lib";
 import { SafeFactory } from "@safe-global/safe-core-sdk";
 
+import  { executeContractCallWithSigners } from "../hardhat/test/helpers/execution";
+
+const GnosisSafe_ = require("@gnosis.pm/safe-contracts/build/artifacts/contracts/GnosisSafe.sol/GnosisSafe.json")
+const GnosisSafeProxy_ = require("@gnosis.pm/safe-contracts/build/artifacts/contracts/proxies/GnosisSafeProxy.sol/GnosisSafeProxy.json")
+
+
 const useSafeWallet = () => {
- 
-    const createGelatoWallet = async (safeAuth: SafeAuthKit<any>): Promise<string | null> => {
-        await safeAuth.signIn();
 
-        const provider = safeAuth.getProvider();
+    const deployments = {
+        "signMessageLib": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "daix": "0xF7d1AA5463f06210f57d7D055Ee8CeB99b3930f2",
+        "dai": "0x0a200434A7186CE40Bb554dBd05246eb7AC9fC32",
+        "oracle": "0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0",
+        "streamingModule": "0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82",
+    }
 
-        if(!provider){
-            return null;
-        }
+    const ADDRESS_0 = "0x0000000000000000000000000000000000000000"
 
-        const ethProvider: ExternalProvider = new ethers.providers.Web3Provider(
-            provider
-        ) as unknown as ExternalProvider;
+    const createSafeWallet = async (signer: ethers.providers.JsonRpcSigner): Promise<ethers.Contract> => {
 
+        const GnosisSafeFactory = new ethers.ContractFactory(GnosisSafe_.abi, GnosisSafe_.bytecode, signer)
+        const GnosisSafeProxyFactory = new ethers.ContractFactory(GnosisSafeProxy_.abi, GnosisSafeProxy_.bytecode, signer)
 
-        const gaslessWalletConfig: GaslessWalletConfig = {
-            apiKey: process.env.NEXT_PUBLIC_GELATO_RELAY_API_KEY,
-        };
-  
-        const gelatoWallet = new GaslessWallet(ethProvider, gaslessWalletConfig);
-        await gelatoWallet.init();
+        const gnosisSafeMasterCopy = await GnosisSafeFactory.deploy();
+        await gnosisSafeMasterCopy.deployed();
 
-        const gelatoWalletContractAddress = gelatoWallet.getAddress();
-        return gelatoWalletContractAddress;
+        const proxy = await GnosisSafeProxyFactory.deploy(gnosisSafeMasterCopy.address)
+        await proxy.deployed()
+
+        const gnosisSafe = new ethers.Contract(proxy.address, GnosisSafe_.abi, signer)
+        const safeOwner = await signer.getAddress()
+        await gnosisSafe.setup([safeOwner], 1, ADDRESS_0, "0x", ADDRESS_0, ADDRESS_0, 0, ADDRESS_0)
+        await executeContractCallWithSigners(gnosisSafe, gnosisSafe, "enableModule", [deployments["streamingModule"]], [signer]);
+
+        return gnosisSafe;
     };
 
-    const createSafeWallet = async (safeAuth: SafeAuthKit<any>, owners: string[]): Promise<string | null> => {
-        await safeAuth.signIn();
-
-        console.log("safeAuth", safeAuth)
-
-        const provider = safeAuth.getProvider();
-
-        console.log("provider", provider)
-
-        if(!provider){
-            return null;
-        }
-
-        const ethProvider = new ethers.providers.Web3Provider(
-            provider
-        );
-
-        console.log("ethProvider", ethProvider)
-
-        const signer = ethProvider.getSigner();
-
-        console.log("signer", signer)
-
-        const ethAdapter = new EthersAdapter({
-            ethers,
-            signerOrProvider: signer,
-        });
-        console.log("ethAdapter", ethAdapter);
-
-        const safeFactory = await SafeFactory.create({
-            ethAdapter,
-        });
-        console.log("sf", safeFactory);
-
-        const safeAccountConfig = {
-            owners: owners,
-            threshold: owners.length,
-        };
-
-        console.log("safeAccountConfig", safeAccountConfig);
-
-        console.log(await safeFactory.predictSafeAddress({ safeAccountConfig, safeDeploymentConfig:{saltNonce:"0x0"} }));
-
-        const safeSdkOwner = await safeFactory.deploySafe({ safeAccountConfig });
-        console.log("owner", safeSdkOwner);
-
-        const safeAddress = safeSdkOwner.getAddress();
-
-        console.log("Your Safe has been deployed:");
-        console.log(`Safe address: ${safeAddress}`);
-        // console.log(`https://app.safe.global/gor:${safeAddress}`);
-
-        return safeAddress;
-    };
-
-    return { createGelatoWallet, createSafeWallet };
+    return { createSafeWallet };
 };
 
 export default useSafeWallet;

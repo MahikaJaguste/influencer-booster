@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import useAuthKit from '@/hooks/useAuthKit'
+import useSafeSigner from '@/hooks/useSafeSigner';
 import axios from 'axios';
 import CreateDeal from '@/components/CreateDeal';
 import useSafeWallet from '@/hooks/useSafeWallet';
@@ -8,6 +9,7 @@ export default function Home() {
 
 	const  { safeAuth } = useAuthKit()
     const { createSafeWallet } = useSafeWallet()
+    const { getSafeSigner } = useSafeSigner()
     const [user, setUser] = useState<string>('')
 
     async function handleSignIn() {
@@ -15,8 +17,12 @@ export default function Home() {
 			const response = await safeAuth.signIn();
 			console.log(response.eoa, response);
             setUser(response.eoa);
-            const safeAddress = await createSafeWallet(safeAuth, [response.eoa])
-            console.log(safeAddress)
+            const safeSigner = await getSafeSigner(safeAuth)
+            console.log(safeSigner)
+            if(!safeSigner) return
+            const gnosisSafe = await createSafeWallet(safeSigner)
+            console.log(gnosisSafe)
+            // console.log(safeAddress)
 		};
 	}
 
