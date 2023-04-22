@@ -2,26 +2,53 @@
 // const utils = require('@gnosis.pm/safe-contracts/test/utils/general')
 const { expect } = require("chai")
 const { ethers } = require("hardhat")
+const { executeContractCallWithSigners, safeSignMessage, signHash } = require("./helpers/execution")
+
 const GnosisSafe_ = require("@gnosis.pm/safe-contracts/build/artifacts/contracts/GnosisSafe.sol/GnosisSafe.json")
 const GnosisSafeProxy_ = require("@gnosis.pm/safe-contracts/build/artifacts/contracts/proxies/GnosisSafeProxy.sol/GnosisSafeProxy.json")
 const SignMessageLib_ = require("@gnosis.pm/safe-contracts/build/artifacts/contracts/examples/libraries/SignMessage.sol/SignMessageLib.json")
+// const { executeContractCallWithSigners } = require("@gnosis.pm/safe-contracts/src/utils/execution");
+
+const TestToken = require("@superfluid-finance/ethereum-contracts/build/contracts/TestToken.json")
+const { Framework } = require("@superfluid-finance/sdk-core")
+const { deployTestFramework } = require("@superfluid-finance/ethereum-contracts/dev-scripts/deploy-test-framework");
 
 let owner
-let account1
+let influencer
 let account2
+let admin
+
 let gnosisSafe
+let streamingModule
 let signUtils
+
+let sfDeployer
+let contractsFramework
+let sf
+let dai
+let daix
 
 const CALL = 0
 const ADDRESS_0 = "0x0000000000000000000000000000000000000000"
+const ADDRESS_1 = "0x0000000000000000000000000000000000000001"
+const thousandEther = ethers.utils.parseEther("10000")
+
+const flowRate = ethers.utils.parseEther("0.000000001");
+const flowRate1 = ethers.utils.parseEther("0.000000002");
+const flowRate2 = ethers.utils.parseEther("0.000000003");
+const tweetId = ethers.utils.formatBytes32String("123456");
+const durationSeconds = 30 * 86400;
+const paymentPlan = 1;
 
 before(async function() {
 
-    [owner, account1, account2] = await ethers.getSigners();
+    [owner, influencer, account2, admin] = await ethers.getSigners();
 
     const GnosisSafe = await ethers.getContractFactory(GnosisSafe_.abi, GnosisSafe_.bytecode, owner)
     const GnosisSafeProxy = await ethers.getContractFactory(GnosisSafeProxy_.abi, GnosisSafeProxy_.bytecode, owner)
     const SignMessageLib = await ethers.getContractFactory(SignMessageLib_.abi, SignMessageLib_.bytecode, owner)
+    const StreamingModule = await ethers.getContractFactory("StreamingModule", owner)
+    const OracleFunctionsConsumer = await ethers.getContractFactory("OracleFunctionsConsumer", owner)
 
     const gnosisSafeMasterCopy = await GnosisSafe.deploy()
     const proxy = await GnosisSafeProxy.deploy(gnosisSafeMasterCopy.address)
@@ -31,224 +58,125 @@ before(async function() {
 
     signUtils = await SignMessageLib.deploy()
 
-    // Create Master Copies
-    // let amodule = await AllowanceModule.deployed()
-    // console.log(amodule.address)
-    // safeModule = await AllowanceModule.new()
+    sfDeployer = await deployTestFramework();
+    // GETTING SUPERFLUID FRAMEWORK SET UP
+
+    // deploy the framework locally
+    contractsFramework = await sfDeployer.getFramework()
+
+    // initialize framework
+    sf = await Framework.create({
+        chainId: 31337,
+        provider: owner.provider,
+        resolverAddress: contractsFramework.resolver, // (empty)
+        protocolReleaseVersion: "test"
+    })
+
+    // DEPLOYING DAI and DAI wrapper super token
+    await sfDeployer.deployWrapperSuperToken(
+        "Fake DAI Token",
+        "fDAI",
+        18,
+        ethers.utils.parseEther("100000000").toString()
+    )
+
+    daix = await sf.loadSuperToken("fDAIx")
+
+    dai = new ethers.Contract(
+        daix.underlyingToken.address,
+        TestToken.abi,
+        owner
+    )
+    // minting test DAI
+    await dai.mint(owner.address, thousandEther)
+    await dai.transfer(gnosisSafe.address, thousandEther)
+
+    let oracle = await OracleFunctionsConsumer.deploy(flowRate1, flowRate2)
+    await oracle.deployed()
+
+    streamingModule = await StreamingModule.deploy(admin.address, daix.address, oracle.address)
+    await streamingModule.deployed()
+
+    console.log("Gnosis safe daix balance = ", await dai.balanceOf(gnosisSafe.address))
+    console.log("Influencer module daix balance", await dai.balanceOf(influencer.address))
 })
 
 
 describe("StreamingSafeModule", function () {
-
     it("Setup", async function () {
         expect(await gnosisSafe.getOwners(), [owner.address])
     })
+
+    it("Enable module", async function () {
+        await executeContractCallWithSigners(gnosisSafe, gnosisSafe, "enableModule", [streamingModule.address], [owner]);
+        let modules = await gnosisSafe.getModulesPaginated(ADDRESS_1, 10)
+        expect(modules.array.length).to.eq(1)
+        expect(modules.array[0]).to.eq(streamingModule.address)
+    })
+
+    it("Approve, start, update and end a deal", async function () {
+
+        await executeContractCallWithSigners(gnosisSafe, streamingModule, "approveDeal", [influencer.address, flowRate, paymentPlan, durationSeconds], [owner]);
+
+        await streamingModule.connect(admin).initDeal(gnosisSafe.address, influencer.address, tweetId);
+
+        const dealHash = await streamingModule.generateDealHash(gnosisSafe.address, influencer.address, tweetId, flowRate, paymentPlan, durationSeconds, 0)
+        const sig = await signHash(influencer, dealHash)
+        await streamingModule.connect(influencer).startDeal(gnosisSafe.address, influencer.address, sig.data);
+        let accountFlowRate = await daix.getFlow({
+            sender: gnosisSafe.address,
+            receiver: influencer.address,
+            providerOrSigner: owner,
+        })
+        expect(accountFlowRate.flowRate).to.equal(flowRate);
+        let deal = await streamingModule.getDealInfo(gnosisSafe.address, influencer.address);
+       
+        await streamingModule.connect(influencer).updateDeal(gnosisSafe.address, influencer.address);
+        accountFlowRate = await daix.getFlow({
+            sender: gnosisSafe.address,
+            receiver: influencer.address,
+            providerOrSigner: owner,
+        })
+        expect(accountFlowRate.flowRate).to.equal(flowRate);
+
+        await ethers.provider.send("evm_increaseTime", [86400 * 7.5])
+        await ethers.provider.send("evm_mine")
+
+        await streamingModule.connect(influencer).updateDeal(gnosisSafe.address, influencer.address);
+        accountFlowRate = await daix.getFlow({
+            sender: gnosisSafe.address,
+            receiver: influencer.address,
+            providerOrSigner: owner,
+        })
+        expect(accountFlowRate.flowRate).to.equal((flowRate*2).toString());
+        deal = await streamingModule.getDealInfo(gnosisSafe.address, influencer.address)
+
+        await ethers.provider.send("evm_increaseTime", [86400 * 7.5])
+        await ethers.provider.send("evm_mine")
+
+        await streamingModule.connect(influencer).updateDeal(gnosisSafe.address, influencer.address);
+        accountFlowRate = await daix.getFlow({
+            sender: gnosisSafe.address,
+            receiver: influencer.address,
+            providerOrSigner: owner,
+        })
+        expect(accountFlowRate.flowRate).to.equal((flowRate*3).toString());
+        deal = await streamingModule.getDealInfo(gnosisSafe.address, influencer.address)
+        // console.log("Deal info", deal)
+
+        await ethers.provider.send("evm_increaseTime", [86400 * 15])
+        await ethers.provider.send("evm_mine")
+
+        await executeContractCallWithSigners(gnosisSafe, streamingModule, "endDeal", [influencer.address], [owner]);
+        accountFlowRate = await daix.getFlow({
+            sender: gnosisSafe.address,
+            receiver: influencer.address,
+            providerOrSigner: owner,
+        })
+        expect(accountFlowRate.flowRate).to.equal("0");
+
+        console.log("Gnosis safe Daix balance =", await daix.balanceOf({account: gnosisSafe.address, providerOrSigner: owner}));
+        console.log("Influencer Daix balance =", await daix.balanceOf({account: influencer.address, providerOrSigner: owner}));
+
+    })
 })
-
-    // let execTransaction = async function(to, value, data, operation, message) {
-    //     let nonce = await gnosisSafe.nonce()
-    //     let transactionHash = await gnosisSafe.getTransactionHash(to, value, data, operation, 0, 0, 0, ADDRESS_0, ADDRESS_0, nonce)
-    //     let sigs = utils.signTransaction(lw, [lw.accounts[0], lw.accounts[1]], transactionHash)
-    //     utils.logGasUsage(
-    //         'execTransaction ' + message,
-    //         await gnosisSafe.execTransaction(to, value, data, operation, 0, 0, 0, ADDRESS_0, ADDRESS_0, sigs, { from: accounts[0] })
-    //     )
-    // }
-
-
-// describe('AllowanceModule delegate', function(accounts) {
-//     let lw
-//     let gnosisSafe
-//     let safeModule
-
-    // let owner
-    // let account1
-    // let account2
-
-    // const CALL = 0
-    // const ADDRESS_0 = "0x0000000000000000000000000000000000000000"
-
-    // beforeEach(async function() {
-    //     // Create lightwallet
-    //     [owner, account1, account2] = await ethers.getSigners();
-
-    //     // Create Master Copies
-    //     // let amodule = await AllowanceModule.deployed()
-    //     // console.log(amodule.address)
-    //     // safeModule = await AllowanceModule.new()
-    //     const GnosisSafe = await ethers.getContractFactory(GnosisSafe_.abi, GnosisSafe_.bytecode, owner)
-    //     const GnosisSafeProxy = await ethers.getContractFactory(GnosisSafeProxy_.abi, GnosisSafeProxy_.bytecode, owner)
-
-    //     const gnosisSafeMasterCopy = await GnosisSafe.deploy({ from: owner })
-    //     console.log(gnosisSafeMasterCopy)
-    //     const proxy = await GnosisSafeProxy.deploy(gnosisSafeMasterCopy.address, { from: owner })
-    //     console.log(proxy)
-    //     gnosisSafe = await GnosisSafe.at(proxy.address)
-    //     console.log(gnosisSafe)
-    //     // await gnosisSafe.setup([lw.accounts[0], lw.accounts[1], accounts[1]], 2, ADDRESS_0, "0x", ADDRESS_0, ADDRESS_0, 0, ADDRESS_0, { from: accounts[0] })
-    // })
-
-    // let execTransaction = async function(to, value, data, operation, message) {
-    //     let nonce = await gnosisSafe.nonce()
-    //     let transactionHash = await gnosisSafe.getTransactionHash(to, value, data, operation, 0, 0, 0, ADDRESS_0, ADDRESS_0, nonce)
-    //     let sigs = utils.signTransaction(lw, [lw.accounts[0], lw.accounts[1]], transactionHash)
-    //     utils.logGasUsage(
-    //         'execTransaction ' + message,
-    //         await gnosisSafe.execTransaction(to, value, data, operation, 0, 0, 0, ADDRESS_0, ADDRESS_0, sigs, { from: accounts[0] })
-    //     )
-    // }
-
-//     it('Execute allowance with delegate', async () => {
-//         const token = await TestToken.new({from: accounts[0]})
-//         await token.transfer(gnosisSafe.address, 1000, {from: accounts[0]}) 
-        
-//         let enableModuleData = await gnosisSafe.contract.methods.enableModule(safeModule.address).encodeABI()
-//         await execTransaction(gnosisSafe.address, 0, enableModuleData, CALL, "enable module")
-//         let modules = await gnosisSafe.getModules()
-//         assert.equal(1, modules.length)
-//         assert.equal(safeModule.address, modules[0])
-
-//         let addDelegateData = await safeModule.contract.methods.addDelegate(lw.accounts[4]).encodeABI()
-//         await execTransaction(safeModule.address, 0, addDelegateData, CALL, "add delegate")
-
-//         let delegates = await safeModule.getDelegates(gnosisSafe.address, 0, 10)
-//         assert.equal(1, delegates.results.length)
-//         assert.equal(lw.accounts[4], delegates.results[0].toLowerCase())
-
-//         let setAllowanceData = await safeModule.contract.methods.setAllowance(lw.accounts[4], token.address, 100, 0, 0).encodeABI()
-//         await execTransaction(safeModule.address, 0, setAllowanceData, CALL, "set allowance")
-
-//         let tokens = await safeModule.getTokens(gnosisSafe.address, lw.accounts[4])
-//         assert.equal(1, tokens.length)
-//         assert.equal(token.address, tokens[0])
-//         let tokenAllowance = await safeModule.getTokenAllowance(gnosisSafe.address, lw.accounts[4], token.address)
-//         assert.equal(100, tokenAllowance[0])
-//         assert.equal(0, tokenAllowance[1])
-//         assert.equal(0, tokenAllowance[2])
-//         // Reset time should be set to current on first init
-//         assert.notEqual(0, tokenAllowance[3])
-//         assert.equal(1, tokenAllowance[4])
-//         let unknownAllowance = await safeModule.getTokenAllowance(gnosisSafe.address, lw.accounts[3], token.address)
-//         assert.equal(0, unknownAllowance[0])
-//         assert.equal(0, unknownAllowance[1])
-//         assert.equal(0, unknownAllowance[2])
-//         assert.equal(0, unknownAllowance[3])
-//         assert.equal(0, unknownAllowance[4])
-
-//         assert.equal(1000, await token.balanceOf(gnosisSafe.address))
-//         assert.equal(0, await token.balanceOf(accounts[1]))
-
-//         let nonce = tokenAllowance[4]
-//         let transferHash = await safeModule.generateTransferHash(
-//             gnosisSafe.address, token.address, accounts[1], 60, ADDRESS_0, 0, nonce
-//         )
-//         let signature = utils.signTransaction(lw, [lw.accounts[4]], transferHash)
-
-//         utils.logGasUsage(
-//             'executeAllowanceTransfer',
-//             await safeModule.executeAllowanceTransfer(
-//                 gnosisSafe.address, token.address, accounts[1], 60, ADDRESS_0, 0, lw.accounts[4], signature
-//             )
-//         )
-
-//         assert.equal(940, await token.balanceOf(gnosisSafe.address))
-//         assert.equal(60, await token.balanceOf(accounts[1]))
-
-//         tokenLimit = await safeModule.getTokenAllowance(gnosisSafe.address, lw.accounts[4], token.address)
-//         assert.equal(100, tokenLimit[0])
-//         assert.equal(60, tokenLimit[1])
-//         assert.equal(0, tokenLimit[2])
-//         assert.ok(tokenLimit[3] > 0)
-//         assert.equal(2, tokenLimit[4])
-
-//         let removeDelegateData = await safeModule.contract.methods.removeDelegate(lw.accounts[4], true).encodeABI()
-//         await execTransaction(safeModule.address, 0, removeDelegateData, CALL, "remove delegate")
-//         let removedAllowance = await safeModule.getTokenAllowance(gnosisSafe.address, lw.accounts[4], token.address)
-//         assert.equal(0, removedAllowance[0])
-//         assert.equal(0, removedAllowance[1])
-//         assert.equal(0, removedAllowance[2])
-//         assert.equal(0, removedAllowance[3])
-//         assert.equal(2, removedAllowance[4])
-//     })
-
-//     it('Execute multiple ether allowance with delegate', async () => {
-
-//         await web3.eth.sendTransaction({from: accounts[0], to: gnosisSafe.address, value: web3.utils.toWei("1.0", 'ether')})
-//         assert.equal(await web3.eth.getBalance(gnosisSafe.address), web3.utils.toWei("1.0", 'ether'))
-
-//         let enableModuleData = await gnosisSafe.contract.methods.enableModule(safeModule.address).encodeABI()
-//         await execTransaction(gnosisSafe.address, 0, enableModuleData, CALL, "enable module")
-//         let modules = await gnosisSafe.getModules()
-//         assert.equal(1, modules.length)
-//         assert.equal(safeModule.address, modules[0])
-
-//         let addDelegateData = await safeModule.contract.methods.addDelegate(lw.accounts[4]).encodeABI()
-//         await execTransaction(safeModule.address, 0, addDelegateData, CALL, "add delegate")
-
-//         let delegates = await safeModule.getDelegates(gnosisSafe.address, 0, 10)
-//         assert.equal(1, delegates.results.length)
-//         assert.equal(lw.accounts[4], delegates.results[0].toLowerCase())
-
-//         let setAllowanceData = await safeModule.contract.methods.setAllowance(lw.accounts[4], ADDRESS_0, web3.utils.toWei("1.0", 'ether'), 0, 0).encodeABI()
-//         await execTransaction(safeModule.address, 0, setAllowanceData, CALL, "set allowance")
-
-//         let tokens = await safeModule.getTokens(gnosisSafe.address, lw.accounts[4])
-//         assert.equal(1, tokens.length)
-//         assert.equal(ADDRESS_0, tokens[0])
-//         let tokenAllowance = await safeModule.getTokenAllowance(gnosisSafe.address, lw.accounts[4], ADDRESS_0)
-//         assert.equal(web3.utils.toWei("1.0", 'ether'), tokenAllowance[0])
-//         assert.equal(0, tokenAllowance[1])
-//         assert.equal(0, tokenAllowance[2])
-//         // Reset time should be set to current on first init
-//         assert.notEqual(0, tokenAllowance[3])
-//         assert.equal(1, tokenAllowance[4])
-
-//         assert.equal(await web3.eth.getBalance(gnosisSafe.address), web3.utils.toWei("1.0", 'ether'))
-//         assert.equal(await web3.eth.getBalance(lw.accounts[0]), 0)
-
-//         let nonce = tokenAllowance[4]
-//         let transferHash = await safeModule.generateTransferHash(
-//             gnosisSafe.address, ADDRESS_0, lw.accounts[0], web3.utils.toWei("0.001", 'ether'), ADDRESS_0, 0, nonce
-//         )
-//         let signature = utils.signTransaction(lw, [lw.accounts[4]], transferHash)
-
-//         utils.logGasUsage(
-//             'executeAllowanceTransfer',
-//             await safeModule.executeAllowanceTransfer(
-//                 gnosisSafe.address, ADDRESS_0, lw.accounts[0], web3.utils.toWei("0.001", 'ether'), ADDRESS_0, 0, lw.accounts[4], signature
-//             )
-//         )
-
-//         assert.equal(await web3.eth.getBalance(gnosisSafe.address), web3.utils.toWei("0.999", 'ether'))
-//         assert.equal(await web3.eth.getBalance(lw.accounts[0]), web3.utils.toWei("0.001", 'ether'))
-
-//         tokenAllowance = await safeModule.getTokenAllowance(gnosisSafe.address, lw.accounts[4], ADDRESS_0)
-//         assert.equal(web3.utils.toWei("1.0", 'ether'), tokenAllowance[0])
-//         assert.equal(web3.utils.toWei("0.001", 'ether'), tokenAllowance[1])
-//         assert.equal(0, tokenAllowance[2])
-//         assert.ok(tokenAllowance[3] > 0)
-//         assert.equal(2, tokenAllowance[4])
-
-//         nonce = tokenAllowance[4]
-//         transferHash = await safeModule.generateTransferHash(
-//             gnosisSafe.address, ADDRESS_0, lw.accounts[0], web3.utils.toWei("0.001", 'ether'), ADDRESS_0, 0, nonce
-//         )
-//         signature = utils.signTransaction(lw, [lw.accounts[4]], transferHash)
-
-//         utils.logGasUsage(
-//             'executeAllowanceTransfer',
-//             await safeModule.executeAllowanceTransfer(
-//                 gnosisSafe.address, ADDRESS_0, lw.accounts[0], web3.utils.toWei("0.001", 'ether'), ADDRESS_0, 0, lw.accounts[4], signature
-//             )
-//         )
-//         assert.equal(await web3.eth.getBalance(gnosisSafe.address), web3.utils.toWei("0.998", 'ether'))
-//         assert.equal(await web3.eth.getBalance(lw.accounts[0]), web3.utils.toWei("0.002", 'ether'))
-
-//         tokenAllowance = await safeModule.getTokenAllowance(gnosisSafe.address, lw.accounts[4], ADDRESS_0)
-//         assert.equal(web3.utils.toWei("1.0", 'ether'), tokenAllowance[0])
-//         assert.equal(web3.utils.toWei("0.002", 'ether'), tokenAllowance[1])
-//         assert.equal(0, tokenAllowance[2])
-//         assert.ok(tokenAllowance[3] > 0)
-//         assert.equal(3, tokenAllowance[4])
-//     })
-// })

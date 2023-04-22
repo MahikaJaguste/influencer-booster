@@ -6,6 +6,12 @@ import "@gnosis.pm/safe-contracts/contracts/common/SignatureDecoder.sol";
 import {ISuperfluid} from "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/ISuperfluid.sol";
 import {ISuperToken} from "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/ISuperToken.sol";
 import {SuperTokenV1Library} from "@superfluid-finance/ethereum-contracts/contracts/apps/SuperTokenV1Library.sol";
+import {IConstantFlowAgreementV1} from "@superfluid-finance/ethereum-contracts/contracts/interfaces/agreements/IConstantFlowAgreementV1.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+import {OracleFunctionsConsumer} from "./mock/OracleFunctionsConsumer.sol";
+
+import "hardhat/console.sol";
 
 interface GnosisSafe {
     /// @dev Allows a Module to execute a Safe transaction without any further confirmations.
@@ -39,23 +45,54 @@ contract StreamingModule is SignatureDecoder {
     //     "SuperAllowance(address safe,address influencer,bytes32 tweetId,uint96 basePaymentFlowRate,uint8 paymentPlan,uint16 nonce)"
     // );
 
-    // mapping Safe => Influencer => bool (is whitelisted Influencer)
-    mapping(address => mapping(address => bool)) public influencers;
-    // mapping Safe => Influencer => Tweet ID
-    mapping(address => mapping(address => bytes32)) public tweetIds;
-    // mapping Safe => Influencer => Base Payment Flow Rate
-    mapping(address => mapping(address => uint96)) public basePaymentFlowRate;
-    // mapping Safe => Influencer => Payment Plan
-    mapping(address => mapping(address => uint8)) public paymentPlan;
-    // mapping Safe => Influencer => Nonce
-    mapping(address => mapping(address => uint8)) public nonces;
+    enum Status {
+        NOT_STARTED,
+        STARTED,
+        COMPLETED
+    }
+
+    struct Deal {
+        bool isWhitelistedInfluencer;
+        Status status;
+        uint8 paymentPlan;
+        uint96 basePaymentFlowRate;
+        uint256 durationSeconds;
+        uint256 dealStartTime;
+        uint256 dealLastUpdatedTime;
+        uint256 tokensDeposited;
+        bytes32 tweetId;
+    }
+
+    uint256 public constant ONE_DAY_IN_SECONDS = 86400;
+
+    // mapping Safe => Influencer => Deal
+    mapping(address => mapping(address => Deal)) private deals;
 
     address private boosterAdmin;
     ISuperToken private superToken;
+    ISuperfluid private host;
+    IConstantFlowAgreementV1 private cfa;
+    OracleFunctionsConsumer private oracleFunctionsConsumer;
 
-    constructor(address _boosterAdmin, address _superToken) {
+    constructor(
+        address _boosterAdmin,
+        address _superToken,
+        address _oracleFunctionsConsumer
+    ) {
         boosterAdmin = _boosterAdmin;
         superToken = ISuperToken(_superToken);
+        host = ISuperfluid(superToken.getHost());
+        cfa = IConstantFlowAgreementV1(
+            address(
+                ISuperfluid(host).getAgreementClass(
+                    //keccak256("org.superfluid-finance.agreements.ConstantFlowAgreement.v1")
+                    0xa9214cc96615e0085d3bb077758db69497dc2dce3b2b1e97bc93c3d18d83efd3
+                )
+            )
+        );
+        oracleFunctionsConsumer = OracleFunctionsConsumer(
+            _oracleFunctionsConsumer
+        );
     }
 
     modifier isBoosterAdmin() {
@@ -67,6 +104,10 @@ contract StreamingModule is SignatureDecoder {
         boosterAdmin = _boosterAdmin;
     }
 
+    // TODO: send dai into safe
+    // TODO: one struct to hold a deal
+    // TODO: add a function to check if deal is approved
+
     /// @dev This function needs to be called by the safe to approve a deal for itself.
     /// @param _influencer Influencer address.
     /// @param _basePaymentFlowRate Base payment flow rate.
@@ -74,11 +115,63 @@ contract StreamingModule is SignatureDecoder {
     function approveDeal(
         address _influencer,
         uint96 _basePaymentFlowRate,
-        uint8 _paymentPlan
+        uint8 _paymentPlan,
+        uint256 _durationSeconds
     ) public {
-        influencers[msg.sender][_influencer] = true;
-        basePaymentFlowRate[msg.sender][_influencer] = _basePaymentFlowRate;
-        paymentPlan[msg.sender][_influencer] = _paymentPlan;
+        require(
+            _paymentPlan == 1 || _paymentPlan == 2,
+            "Payment plan must be 1 or 2"
+        );
+        require(_basePaymentFlowRate > 0, "Base payment flow rate must be > 0");
+        require(_durationSeconds > 0, "Duration must be > 0");
+        require(_influencer != address(0), "Influencer address cannot be 0");
+        require(
+            deals[msg.sender][_influencer].status != Status.STARTED,
+            "Deal already approved"
+        );
+
+        uint256 tokensNeeded = _basePaymentFlowRate * _durationSeconds;
+        address underlyingToken = superToken.getUnderlyingToken();
+
+        bytes memory data = abi.encodeCall(
+            IERC20(underlyingToken).approve,
+            (address(superToken), tokensNeeded)
+        );
+
+        require(
+            GnosisSafe(msg.sender).execTransactionFromModule(
+                underlyingToken,
+                0,
+                data,
+                Enum.Operation.Call
+            ),
+            "Could not execute underlying token approval"
+        );
+
+        console.log("tokensNeeded", tokensNeeded);
+
+        data = abi.encodeCall(superToken.upgrade, (tokensNeeded));
+        require(
+            GnosisSafe(msg.sender).execTransactionFromModule(
+                address(superToken),
+                0,
+                data,
+                Enum.Operation.Call
+            ),
+            "Could not execute token upgrade"
+        );
+
+        deals[msg.sender][_influencer] = Deal({
+            isWhitelistedInfluencer: true,
+            status: Status.NOT_STARTED,
+            paymentPlan: _paymentPlan,
+            basePaymentFlowRate: _basePaymentFlowRate,
+            durationSeconds: _durationSeconds,
+            dealStartTime: 0,
+            dealLastUpdatedTime: 0,
+            tokensDeposited: tokensNeeded,
+            tweetId: ""
+        });
     }
 
     /// @dev This function needs to be called by the platform admin after checking that the tweet is relevant to this deal.
@@ -90,7 +183,13 @@ contract StreamingModule is SignatureDecoder {
         address _influencer,
         bytes32 _tweetId
     ) public isBoosterAdmin {
-        tweetIds[_safe][_influencer] = _tweetId;
+        Deal storage deal = deals[_safe][_influencer];
+        require(deal.isWhitelistedInfluencer, "Influencer is not whitelisted");
+        require(
+            deal.status == Status.NOT_STARTED,
+            "Deal has already been started"
+        );
+        deal.tweetId = _tweetId;
     }
 
     /// @dev Getter function for details of a deal.
@@ -99,14 +198,8 @@ contract StreamingModule is SignatureDecoder {
     function getDealInfo(
         address _safe,
         address _influencer
-    ) public view returns (bool, bytes32, uint96, uint8, uint8) {
-        return (
-            influencers[_safe][_influencer],
-            tweetIds[_safe][_influencer],
-            basePaymentFlowRate[_safe][_influencer],
-            paymentPlan[_safe][_influencer],
-            nonces[_safe][_influencer]
-        );
+    ) public view returns (Deal memory) {
+        return deals[_safe][_influencer];
     }
 
     /// @dev This function needs to be called by the influencer to start the deal.
@@ -115,46 +208,220 @@ contract StreamingModule is SignatureDecoder {
     /// @param _safe Safe contract address.
     /// @param _influencer Influencer address.
     /// @param signature Signature generated by the influencer to start the deal.
-    function executeAllowanceTransfer(
+    function startDeal(
         GnosisSafe _safe,
         address _influencer,
         bytes memory signature
     ) public {
-        (
-            bool isInfluencer,
-            bytes32 _tweetId,
-            uint96 _basePaymentFlowRate,
-            uint8 _paymentPlan,
-            uint8 _nonce
-        ) = getDealInfo(address(_safe), _influencer);
+        Deal memory deal = getDealInfo(address(_safe), _influencer);
 
-        require(isInfluencer, "Not an influencer");
+        require(deal.isWhitelistedInfluencer, "Influencer is not whitelisted");
         require(
-            _tweetId != 0,
+            deal.status == Status.NOT_STARTED,
+            "Deal has already been started"
+        );
+        require(
+            deal.tweetId != bytes32(0),
             "Tweet ID not set. Please start the deal first."
         );
-        require(
-            _basePaymentFlowRate != 0,
-            "Base Payment Flow Rate not set. Please start the deal first."
-        );
-        require(
-            _paymentPlan != 0,
-            "Payment Plan not set. Please start the deal first."
-        );
-        require(_nonce == 0, "Deal already executed.");
 
-        nonces[address(_safe)][_influencer] = _nonce + 1;
+        deals[address(_safe)][_influencer].status = Status.STARTED;
+        deals[address(_safe)][_influencer].dealStartTime = block.timestamp;
+        deals[address(_safe)][_influencer].dealLastUpdatedTime = block
+            .timestamp;
 
         bytes memory dealHashData = generateDealHashData(
             address(_safe),
             _influencer,
-            _tweetId,
-            _basePaymentFlowRate,
-            _paymentPlan,
-            _nonce
+            deal.tweetId,
+            deal.basePaymentFlowRate,
+            deal.paymentPlan,
+            deal.durationSeconds,
+            deal.status
         );
 
         checkSignature(_influencer, signature, dealHashData);
+
+        startDealOperation(_safe, _influencer, deal.basePaymentFlowRate);
+    }
+
+    function startDealOperation(
+        GnosisSafe _safe,
+        address _influencer,
+        uint96 _basePaymentFlowRate
+    ) private {
+        int96 flowRate = int96(_basePaymentFlowRate);
+
+        bytes memory callData = abi.encodeCall(
+            cfa.createFlow,
+            (superToken, _influencer, flowRate, new bytes(0))
+        );
+
+        bytes memory data = abi.encodeCall(
+            host.callAgreement,
+            (cfa, callData, new bytes(0))
+        );
+
+        require(
+            _safe.execTransactionFromModule(
+                address(host),
+                0,
+                data,
+                Enum.Operation.Call
+            ),
+            "Could not execute super token create flow"
+        );
+    }
+
+    /// @dev This function needs to be can be called by anyone to update the deal.
+    ///
+    /// @param _safe Safe contract address.
+    /// @param _influencer Influencer address.
+    function updateDeal(GnosisSafe _safe, address _influencer) public {
+        Deal memory deal = getDealInfo(address(_safe), _influencer);
+
+        require(deal.isWhitelistedInfluencer, "Influencer is not whitelisted");
+        require(deal.status == Status.STARTED, "Deal is not active");
+        require(deal.tweetId != bytes32(0), "Tweet ID not set");
+
+        uint96 updatedPaymentFlowRate = oracleFunctionsConsumer.getTweetScore(
+            deal.tweetId,
+            deal.basePaymentFlowRate,
+            deal.paymentPlan
+        );
+
+        if (updatedPaymentFlowRate == deal.basePaymentFlowRate) {
+            return;
+        }
+
+        bool updateRate = true;
+        uint256 tokensNeeded = 0;
+
+        uint256 timeSinceDealLastUpdated = (block.timestamp -
+            deal.dealLastUpdatedTime);
+        uint256 tokensUsed = timeSinceDealLastUpdated *
+            deal.basePaymentFlowRate;
+        uint256 tokensDeposited = deal.tokensDeposited;
+        uint newTokensDeposited = 0;
+
+        uint256 tokensRemaining = tokensDeposited - tokensUsed;
+        if (tokensRemaining < 0) {
+            tokensRemaining = 0;
+        }
+
+        if (timeSinceDealLastUpdated >= deal.durationSeconds) {
+            updateRate = false;
+        } else {
+            newTokensDeposited =
+                updatedPaymentFlowRate *
+                (deal.durationSeconds - timeSinceDealLastUpdated);
+            tokensNeeded = newTokensDeposited - tokensRemaining;
+        }
+
+        if (!updateRate) {
+            return;
+        }
+
+        console.log("tokensNeeded", tokensNeeded);
+
+        deals[address(_safe)][_influencer].dealLastUpdatedTime = block
+            .timestamp;
+        deals[address(_safe)][_influencer]
+            .basePaymentFlowRate = updatedPaymentFlowRate;
+        deals[address(_safe)][_influencer].tokensDeposited = newTokensDeposited;
+        deals[address(_safe)][_influencer].durationSeconds =
+            deal.durationSeconds -
+            timeSinceDealLastUpdated;
+
+        address underlyingToken = superToken.getUnderlyingToken();
+
+        bytes memory data = abi.encodeCall(
+            IERC20(underlyingToken).approve,
+            (address(superToken), tokensNeeded)
+        );
+
+        require(
+            _safe.execTransactionFromModule(
+                underlyingToken,
+                0,
+                data,
+                Enum.Operation.Call
+            ),
+            "Could not execute underlying token approval"
+        );
+
+        data = abi.encodeCall(superToken.upgrade, (tokensNeeded));
+        require(
+            _safe.execTransactionFromModule(
+                address(superToken),
+                0,
+                data,
+                Enum.Operation.Call
+            ),
+            "Could not execute token upgrade"
+        );
+
+        updateDealOperation(_safe, _influencer, updatedPaymentFlowRate);
+    }
+
+    function updateDealOperation(
+        GnosisSafe _safe,
+        address _influencer,
+        uint96 _updatedPaymentFlowRate
+    ) private {
+        int96 flowRate = int96(_updatedPaymentFlowRate);
+
+        bytes memory callData = abi.encodeCall(
+            cfa.updateFlow,
+            (superToken, _influencer, flowRate, new bytes(0))
+        );
+
+        bytes memory data = abi.encodeCall(
+            host.callAgreement,
+            (cfa, callData, new bytes(0))
+        );
+
+        require(
+            _safe.execTransactionFromModule(
+                address(host),
+                0,
+                data,
+                Enum.Operation.Call
+            ),
+            "Could not execute super token create flow"
+        );
+    }
+
+    /// @dev This function needs to be called by the safe to end the deal.
+    ///
+    /// @param _influencer Influencer address.
+    function endDeal(address _influencer) public {
+        Deal memory deal = getDealInfo(msg.sender, _influencer);
+        require(deal.status == Status.STARTED, "Deal is not active");
+        require(
+            deal.dealStartTime + deal.durationSeconds <= block.timestamp,
+            "Deal is not over"
+        );
+        deals[msg.sender][_influencer].status = Status.COMPLETED;
+        bytes memory callData = abi.encodeCall(
+            cfa.deleteFlow,
+            (superToken, msg.sender, _influencer, new bytes(0))
+        );
+
+        bytes memory data = abi.encodeCall(
+            host.callAgreement,
+            (cfa, callData, new bytes(0))
+        );
+
+        require(
+            GnosisSafe(msg.sender).execTransactionFromModule(
+                address(host),
+                0,
+                data,
+                Enum.Operation.Call
+            ),
+            "Could not execute super token create flow"
+        );
     }
 
     /// @dev Returns the chain id used by this contract.
@@ -174,7 +441,8 @@ contract StreamingModule is SignatureDecoder {
         bytes32 _tweetId,
         uint96 _basePaymentFlowRate,
         uint8 _paymentPlan,
-        uint16 _nonce
+        uint256 _durationSeconds,
+        Status _status
     ) private view returns (bytes memory) {
         uint256 chainId = getChainId();
         bytes32 domainSeparator = keccak256(
@@ -188,7 +456,8 @@ contract StreamingModule is SignatureDecoder {
                 _tweetId,
                 _basePaymentFlowRate,
                 _paymentPlan,
-                _nonce
+                _durationSeconds,
+                _status
             )
         );
         return
@@ -207,7 +476,8 @@ contract StreamingModule is SignatureDecoder {
         bytes32 _tweetId,
         uint96 _basePaymentFlowRate,
         uint8 _paymentPlan,
-        uint16 _nonce
+        uint256 _durationSeconds,
+        Status _status
     ) public view returns (bytes32) {
         return
             keccak256(
@@ -217,7 +487,8 @@ contract StreamingModule is SignatureDecoder {
                     _tweetId,
                     _basePaymentFlowRate,
                     _paymentPlan,
-                    _nonce
+                    _durationSeconds,
+                    _status
                 )
             );
     }
@@ -272,22 +543,5 @@ contract StreamingModule is SignatureDecoder {
         }
         // 0 for the recovered owner indicates that an error happened.
         require(owner != address(0), "owner != address(0)");
-    }
-
-    function transfer(
-        GnosisSafe safe,
-        address token,
-        address payable to,
-        uint96 amount
-    ) private {
-        bytes memory data = abi.encodeWithSignature(
-            "transfer(address,uint256)",
-            to,
-            amount
-        );
-        require(
-            safe.execTransactionFromModule(token, 0, data, Enum.Operation.Call),
-            "Could not execute token transfer"
-        );
     }
 }

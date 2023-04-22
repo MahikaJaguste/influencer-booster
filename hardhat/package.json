@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@gnosis.pm/safe-contracts": "^1.3.0",
+    "@openzeppelin/contracts": "^4.8.3",
     "@superfluid-finance/sdk-core": "^0.6.3",
     "dotenv": "^16.0.3"
   }
