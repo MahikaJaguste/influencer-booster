@@ -8,6 +8,11 @@ export interface ICreateDealRequest {
     dealDuration: number;
 }
 
+export interface ICreateUserRequest {
+    eoa: string;
+    gnosisSafeAddress: string;
+}
+
 export enum DealStatusEnum {
     EnterpriseCreated = "EnterpriseCreated",
 }
@@ -23,6 +28,14 @@ export interface IDeal {
     dealPrice: number;
     dealDuration: number;
     status: DealStatusEnum;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface IUser {
+    id: string;
+    eoa: string;
+    gnosisSafeAddress: string;
     createdAt: Date;
     updatedAt: Date;
 }

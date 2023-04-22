@@ -1,13 +1,10 @@
 import { useState } from 'react'
-import useAuthKit from '@/hooks/useAuthKit'
-import axios from 'axios';
+import { IUser } from '@/firebase/types';
 
 export default function CreateDeal({
     enterprise,
-    enterpriseEmail
 }: {
-    enterprise: string,
-    enterpriseEmail: string
+    enterprise: IUser
 }) {
 
     const [influencerEmail, setInfluencerEmail] = useState<string>('')
@@ -18,17 +15,8 @@ export default function CreateDeal({
 
 
     async function createDeal() {
-        if(enterprise && enterprise.length) {
-            const response = await axios.post('/api/create-deal', { 
-                enterprise,
-                enterpriseEmail,
-                influencerEmail,
-                dealCategory,
-                dealInfo,
-                dealPrice,
-                dealDuration
-             })
-            console.log(response)
+        if(enterprise) {
+            
         }
     }
 
@@ -73,7 +61,7 @@ export default function CreateDeal({
                 onChange={(e) => setDealDuration(Number(e.target.value))}
             />
 
-            {enterprise && enterprise.length ?
+            {enterprise ?
                 <button
                     onClick={() => {
                         console.log('clicked')
