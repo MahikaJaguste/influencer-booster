@@ -68,11 +68,11 @@ contract StreamingModule is SignatureDecoder {
     // mapping Safe => Influencer => Deal
     mapping(address => mapping(address => Deal)) private deals;
 
-    address private boosterAdmin;
-    ISuperToken private superToken;
-    ISuperfluid private host;
-    IConstantFlowAgreementV1 private cfa;
-    OracleFunctionsConsumer private oracleFunctionsConsumer;
+    address public boosterAdmin;
+    ISuperToken public superToken;
+    ISuperfluid public host;
+    IConstantFlowAgreementV1 public cfa;
+    OracleFunctionsConsumer public oracleFunctionsConsumer;
 
     constructor(
         address _boosterAdmin,

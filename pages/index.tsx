@@ -1,15 +1,18 @@
 import { useState } from 'react'
 import useAuthKit from '@/hooks/useAuthKit'
 import useSafeSigner from '@/hooks/useSafeSigner';
+import useDealModule from '@/hooks/useDealModule';
 import axios from 'axios';
 import CreateDeal from '@/components/CreateDeal';
 import useSafeWallet from '@/hooks/useSafeWallet';
+import * as ethers from 'ethers';
 
 export default function Home() {
 
 	const  { safeAuth } = useAuthKit()
     const { createSafeWallet } = useSafeWallet()
     const { getSafeSigner } = useSafeSigner()
+    const { approveDeal, initDeal, startDeal, updateDeal, getDeal, getFlow } = useDealModule()
     const [user, setUser] = useState<string>('')
 
     async function handleSignIn() {
@@ -22,7 +25,23 @@ export default function Home() {
             if(!safeSigner) return
             const gnosisSafe = await createSafeWallet(safeSigner)
             console.log(gnosisSafe)
-            // console.log(safeAddress)
+            const influencer = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+            const flowRate = 1000000000
+            const tweetId = ethers.utils.formatBytes32String("123456");
+            await approveDeal(safeSigner, gnosisSafe, influencer, flowRate);
+            await initDeal(safeSigner, gnosisSafe, influencer, tweetId);
+            await startDeal(safeSigner, gnosisSafe, influencer, tweetId, flowRate);
+            await getDeal(safeSigner, gnosisSafe, influencer);
+            await getFlow(safeSigner, gnosisSafe, influencer);
+            await updateDeal(safeSigner, gnosisSafe, influencer);
+            await getDeal(safeSigner, gnosisSafe, influencer);
+            await getFlow(safeSigner, gnosisSafe, influencer);
+            await updateDeal(safeSigner, gnosisSafe, influencer);
+            await getDeal(safeSigner, gnosisSafe, influencer);
+            await getFlow(safeSigner, gnosisSafe, influencer);
+            await updateDeal(safeSigner, gnosisSafe, influencer);
+            await getDeal(safeSigner, gnosisSafe, influencer);
+            await getFlow(safeSigner, gnosisSafe, influencer);
 		};
 	}
 
