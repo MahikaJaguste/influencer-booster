@@ -3,11 +3,13 @@ import useAuthKit from '@/hooks/useAuthKit'
 import useSafeSigner from '@/hooks/useSafeSigner';
 import useDealModule from '@/hooks/useDealModule';
 import axios from 'axios';
-import CreateDeal from '@/components/CreateDeal';
+import DealCreation from '@/components/DealCreation';
+import DealAccept from '@/components/DealAccept';
 import useSafeWallet from '@/hooks/useSafeWallet';
 import * as ethers from 'ethers';
 import { CreateUser, GetUser } from '@/firebase/crud';
 import { IUser } from '@/firebase/types';
+import DealDisplay from '@/components/DealDisplay';
 
 export default function Home() {
 
@@ -16,6 +18,7 @@ export default function Home() {
     const { getSafeSigner } = useSafeSigner()
     const { approveDeal, initDeal, startDeal, updateDeal, getDeal, getFlow } = useDealModule()
     const [user, setUser] = useState<IUser>()
+    const [safeSigner, setSafeSigner] = useState<ethers.providers.JsonRpcSigner>()
 
     // async function handleSignIn() {
 	// 	if (safeAuth) {
@@ -51,9 +54,9 @@ export default function Home() {
 		if (safeAuth) {
 			const response = await safeAuth.signIn();
             let { user } = await GetUser(response.eoa)
+            const safeSigner = await getSafeSigner(safeAuth)
 
             if(!user) {
-                const safeSigner = await getSafeSigner(safeAuth)
                 if(!safeSigner) return
                 const gnosisSafe = await createSafeWallet(safeSigner);
                 ({ user } = await CreateUser({
@@ -62,12 +65,15 @@ export default function Home() {
                 }))
             }
             setUser(user)
+            setSafeSigner(safeSigner)
+            console.log(user)
 		};
 	}
 
     async function handleSignOut() {
         if (safeAuth) {
             await safeAuth.signOut();
+            setUser(undefined)
         };
     }
 
@@ -89,9 +95,12 @@ export default function Home() {
                 }}
             >Sign Out</button>
 
-            {/* {user && user.eoa ?
-                <CreateDeal enterprise={user}/>
-            : null} */}
+            <br/>
+            <br/>
+
+            <DealCreation enterprise={user} enterpriseSigner={safeSigner}/>
+            <DealAccept user={user} userSigner={safeSigner}/>
+            <DealDisplay user={user} />
         </>
     )
 }

@@ -28,7 +28,12 @@ const useSafeWallet = () => {
         return gnosisSafe;
     };
 
-    return { createSafeWallet };
+    const getSafe = async (signer: ethers.providers.JsonRpcSigner, safeAddress: string): Promise<ethers.Contract> => {
+        const gnosisSafe = new ethers.Contract(safeAddress, GnosisSafe_.abi, signer)
+        return gnosisSafe;
+    };
+
+    return { createSafeWallet, getSafe };
 };
 
 export default useSafeWallet;

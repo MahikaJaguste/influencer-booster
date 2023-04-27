@@ -1,11 +1,9 @@
 export interface ICreateDealRequest {
     enterprise: string;
-    enterpriseEmail: string;
-    influencerEmail: string;
-    dealCategory: string;
-    dealInfo: any,
-    dealPrice: number;
-    dealDuration: number;
+    influencer: string;
+    flowRate: number;
+    paymentPlan: number,
+    durationSeconds: number;
 }
 
 export interface ICreateUserRequest {
@@ -14,20 +12,19 @@ export interface ICreateUserRequest {
 }
 
 export enum DealStatusEnum {
-    EnterpriseCreated = "EnterpriseCreated",
+    EnterpriseApproved = "EnterpriseApproved",
+    DealStarted = "DealStarted",
 }
 
 export interface IDeal {
     id: string;
     enterprise: string;
-    enterpriseEmail: string;
-    influencer?: string;
-    influencerEmail: string;
-    dealCategory: string;
-    dealInfo: any,
-    dealPrice: number;
-    dealDuration: number;
+    influencer: string;
+    flowRate: number;
+    paymentPlan: number,
+    durationSeconds: number;
     status: DealStatusEnum;
+    unqiueCode: string;
     createdAt: Date;
     updatedAt: Date;
 }
