@@ -91,6 +91,17 @@ const useDealModule = () => {
         console.log(accountFlowRate_);
     };
 
+    const getBalance = async (signer: ethers.providers.JsonRpcSigner, account: string): Promise<void> => {
+        await signer.sendTransaction({ to: account, value: ethers.utils.parseEther("0") });
+        const daix = new ethers.Contract(
+            deployments["daix"],
+            TestToken.abi,
+            signer
+        )
+        const balance = await daix.balanceOf(account)
+        console.log("balance = ", balance.toString())
+    };
+
     const updateDeal = async (signer: ethers.providers.JsonRpcSigner, gnosisSafe: ethers.Contract, influencer: string): Promise<void> => {
         console.log("updateDeal")
         const streamingModule = StreamingModule__factory.connect(deployments["streamingModule"], signer);
@@ -99,7 +110,7 @@ const useDealModule = () => {
         console.log("updateDeal done", txn)
     };
 
-    return { approveDeal, initDeal, startDeal, getDeal, getFlow, updateDeal };
+    return { approveDeal, initDeal, startDeal, getDeal, getFlow, updateDeal, getBalance };
 };
 
 export default useDealModule;

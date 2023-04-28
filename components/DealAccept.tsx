@@ -51,8 +51,8 @@ export default function DealAccept({
         const tweetId_ = ethers.utils.formatBytes32String(tweetId);
         const gnosisSafe = await getSafe(userSigner, user.gnosisSafeAddress);
         const safe = await getSafe(userSigner, deal.enterprise)
-        // await initDeal(userSigner, safe, deal.influencer, tweetId_);
-        // await startDeal(userSigner, safe, deal.influencer, tweetId_, deal.flowRate);
+        await initDeal(userSigner, safe, deal.influencer, tweetId_);
+        await startDeal(userSigner, safe, deal.influencer, tweetId_, deal.flowRate);
         await InitDeal(tweetId, deal.id)
     }
 

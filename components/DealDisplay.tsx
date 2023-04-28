@@ -8,8 +8,10 @@ import useSafeWallet from '@/hooks/useSafeWallet';
 
 export default function DealDisplay({
     user,
+    userSigner
 }: {
     user: IUser | undefined
+    userSigner: ethers.providers.JsonRpcSigner | undefined
 }) {
 
 
@@ -17,7 +19,7 @@ export default function DealDisplay({
     const [flowRate, setFlowRate] = useState<number>(0)
     const [paymentPlan, setPaymentPlan] = useState<number>(0)
     const [durationSeconds, setDurationSeconds] = useState<number>(0)
-    const { approveDeal } = useDealModule()
+    const { updateDeal, getBalance } = useDealModule()
     const { getSafe } = useSafeWallet()
 
     const [deals, setDeals] = useState<IDeal[]>([])
@@ -26,6 +28,27 @@ export default function DealDisplay({
     async function getDeals(user: IUser){
         const deals_ = await GetDeals(user.eoa, user.gnosisSafeAddress)
         setDeals(deals_)  
+    }
+
+    async function updateDeal_(deal: IDeal){
+        if(!user || !userSigner) {
+            alert('Sign in to execute deal')
+            return
+        }
+        if(!deal) {
+            alert('Please enter deal unique code first.')
+            return
+        }
+        const safe = await getSafe(userSigner, deal.enterprise)
+        await updateDeal(userSigner, safe, deal.influencer);
+    }
+
+    async function refreshBalance() {
+        if(!user || !userSigner) {
+            alert('Sign in to execute deal')
+            return
+        }
+        await getBalance(userSigner, user.gnosisSafeAddress)
     }
 
     useEffect(() => {
@@ -50,6 +73,8 @@ export default function DealDisplay({
                                 <p>Influencer Safe: {deal.influencer}</p>
                                 <p>Enterprise: {deal.enterprise}</p>
                                 <p>Status: {deal.status}</p>
+                                <button onClick={() => updateDeal_(deal)}>Update Deal</button>
+                                <button onClick={() => refreshBalance()}>Refresh Balance</button>
                             </li>
                         ))}
                     </ul>

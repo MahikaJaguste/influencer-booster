@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import useAuthKit from '@/hooks/useAuthKit'
 import useSafeSigner from '@/hooks/useSafeSigner';
 import useDealModule from '@/hooks/useDealModule';
@@ -100,7 +100,7 @@ export default function Home() {
 
             <DealCreation enterprise={user} enterpriseSigner={safeSigner}/>
             <DealAccept user={user} userSigner={safeSigner}/>
-            <DealDisplay user={user} />
+            <DealDisplay user={user} userSigner={safeSigner}/>
         </>
     )
 }

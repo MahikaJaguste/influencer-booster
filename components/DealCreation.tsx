@@ -25,9 +25,9 @@ export default function DealCreation({
     async function createDeal() {
         if(enterprise && enterpriseSigner) {
             const gnosisSafe = await getSafe(enterpriseSigner, enterprise.gnosisSafeAddress)
-            // await approveDeal(enterpriseSigner, gnosisSafe, influencer, flowRate);
+            await approveDeal(enterpriseSigner, gnosisSafe, influencer, flowRate);
             const deal = await CreateDeal({
-                enterprise: enterprise.eoa,
+                enterprise: enterprise.gnosisSafeAddress,
                 influencer,
                 flowRate,
                 paymentPlan,
