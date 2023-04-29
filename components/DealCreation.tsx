@@ -26,7 +26,7 @@ export default function DealCreation({
     const [twitterHandle, setTwitterHandle] = useState<string>('')
     const [influencerTwitterHandle, setInfluencerTwitterHandle] = useState<string>('')
     const [isLoading, setIsLoading] = useState<boolean>(false)
-    const { approveDeal } = useDealModule()
+    const { approveDeal, getDaiBalance } = useDealModule()
     const { getSafe } = useSafeWallet()
 
 
@@ -36,8 +36,13 @@ export default function DealCreation({
                 alert("Please fill in all fields.")
                 return;
             }
-            // todo: check if safe has enough funds
             setIsLoading(true)
+            const balance = await getDaiBalance(enterpriseSigner, enterprise.gnosisSafeAddress)
+            if(parseFloat(balance) < flowRate * durationSeconds) {
+                alert("Insufficient balance. Please deposit DAI into your Safe first.")
+                setIsLoading(false)
+                return;
+            }
             const gnosisSafe = await getSafe(enterpriseSigner, enterprise.gnosisSafeAddress)
             await approveDeal(enterpriseSigner, gnosisSafe, influencer, flowRate);
             const deal = await CreateDeal({

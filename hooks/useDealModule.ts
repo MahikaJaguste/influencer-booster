@@ -20,6 +20,16 @@ const useDealModule = () => {
     const paymentPlan = 1;
     const durationSeconds = 30 * 86400;
 
+    const getDaiBalance = async (signer: ethers.providers.JsonRpcSigner, account: string): Promise<string> => {
+        const dai = new ethers.Contract(
+            deployments["dai"],
+            TestToken.abi,
+            signer
+        )
+        const balance = await dai.balanceOf(account)
+        return balance.toString()
+    };
+
     const approveDeal = async (signer: ethers.providers.JsonRpcSigner, gnosisSafe: ethers.Contract, influencer: string, flowRate: number): Promise<void> => {
         const dai = new ethers.Contract(
             deployments["dai"],
@@ -108,7 +118,7 @@ const useDealModule = () => {
         console.log("updateDeal done", txn)
     };
 
-    return { approveDeal, initDeal, startDeal, getDeal, getFlow, updateDeal, getBalance };
+    return { approveDeal, initDeal, startDeal, getDeal, getFlow, updateDeal, getBalance, getDaiBalance };
 };
 
 export default useDealModule;

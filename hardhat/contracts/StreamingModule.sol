@@ -104,10 +104,6 @@ contract StreamingModule is SignatureDecoder {
         boosterAdmin = _boosterAdmin;
     }
 
-    // TODO: send dai into safe
-    // TODO: one struct to hold a deal
-    // TODO: add a function to check if deal is approved
-
     /// @dev This function needs to be called by the safe to approve a deal for itself.
     /// @param _influencer Influencer address.
     /// @param _basePaymentFlowRate Base payment flow rate.
