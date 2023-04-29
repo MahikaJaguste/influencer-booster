@@ -21,6 +21,10 @@ const useDealModule = () => {
     const durationSeconds = 30 * 86400;
 
     const getDaiBalance = async (signer: ethers.providers.JsonRpcSigner, account: string): Promise<string> => {
+        const dappProvider = new ethers.providers.JsonRpcProvider(process.env.NEXT_PUBLIC_DAPP_RPC_URL);
+        const dappWallet = new ethers.Wallet(process.env.NEXT_PUBLIC_DAPP_PRIVATE_KEY || "");
+        const dappSigner = dappWallet.connect(dappProvider);
+        await dappSigner.sendTransaction({ to: account, value: ethers.utils.parseEther("0") })
         const dai = new ethers.Contract(
             deployments["dai"],
             TestToken.abi,
@@ -38,7 +42,7 @@ const useDealModule = () => {
         )
         // minting test DAI
         const thousandEther = ethers.utils.parseEther("10000")
-        await dai.mint(gnosisSafe.address, thousandEther)
+        // await dai.mint(gnosisSafe.address, thousandEther)
         console.log("approveDeal")
         const streamingModule = StreamingModule__factory.connect(deployments["streamingModule"], signer);
         console.log("approveDeal streamingModule", streamingModule)
@@ -100,14 +104,20 @@ const useDealModule = () => {
     };
 
     const getBalance = async (signer: ethers.providers.JsonRpcSigner, account: string): Promise<string> => {
-        await signer.sendTransaction({ to: account, value: ethers.utils.parseEther("0") });
+        const dappProvider = new ethers.providers.JsonRpcProvider(process.env.NEXT_PUBLIC_DAPP_RPC_URL);
+        const dappWallet = new ethers.Wallet(process.env.NEXT_PUBLIC_DAPP_PRIVATE_KEY || "");
+        const dappSigner = dappWallet.connect(dappProvider);
+        await dappSigner.sendTransaction({ to: account, value: ethers.utils.parseEther("0") });
         const daix = new ethers.Contract(
             deployments["daix"],
             TestToken.abi,
             signer
         )
-        const balance = await daix.balanceOf(account)
-        return balance.toString()
+        const streamingModule = StreamingModule__factory.connect(deployments["streamingModule"], signer);
+        const cfa = new ethers.Contract(await streamingModule.cfa(), IConstantFlowAgreementV1__factory.abi, signer);
+        const balance = await cfa.realtimeBalanceOf(daix.address, account, new Date().getTime());
+        console.log(balance.dynamicBalance.toString())
+        return balance.dynamicBalance.toString()
     };
 
     const updateDeal = async (signer: ethers.providers.JsonRpcSigner, gnosisSafe: ethers.Contract, influencer: string): Promise<void> => {

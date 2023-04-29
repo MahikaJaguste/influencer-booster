@@ -55,6 +55,7 @@ export default function DealCreation({
                 influencerTwitterHandle,
             })
             setIsLoading(false)
+            alert("Deal created successfully!")
         }
         else {
             alert("Please sign in first.")

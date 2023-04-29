@@ -23,10 +23,11 @@ export default function Home() {
 	const  { safeAuth } = useAuthKit()
     const { createSafeWallet } = useSafeWallet()
     const { getSafeSigner } = useSafeSigner()
-    const { approveDeal, initDeal, startDeal, updateDeal, getDeal, getFlow, getBalance } = useDealModule()
+    const { approveDeal, initDeal, startDeal, updateDeal, getDeal, getFlow, getBalance, getDaiBalance } = useDealModule()
     const [user, setUser] = useState<IUser>()
     const [safeSigner, setSafeSigner] = useState<ethers.providers.JsonRpcSigner>()
     const [balance, setBalance] = useState<string>()
+    const [daiBalance, setDaiBalance] = useState<string>()
 
     const [value, setValue] = useState(0);
 
@@ -84,9 +85,11 @@ export default function Home() {
             if(!safeSigner_) return
 
             const balance_ = await getBalance(safeSigner_, user.gnosisSafeAddress)
-            if(!balance_) return
-            setBalance(balance_)
-
+            const daiBalance_ = await getDaiBalance(safeSigner_, user.gnosisSafeAddress)
+            if(balance_)
+                setBalance(balance_)
+            if(daiBalance_)
+                setDaiBalance(daiBalance_)
 		};
 	}
 
@@ -96,6 +99,19 @@ export default function Home() {
             setUser(undefined)
         };
     }
+
+    async function refreshBalance() {
+        if(!safeSigner) return
+        if(!user) return
+        const balance_ = await getBalance(safeSigner, user.gnosisSafeAddress);
+        const daiBalance_ = await getDaiBalance(safeSigner, user.gnosisSafeAddress);
+        if(balance_)
+                setBalance(balance_)
+        if(daiBalance_)
+            setDaiBalance(daiBalance_)
+    }
+
+
 
     return (
         <div>
@@ -121,12 +137,12 @@ export default function Home() {
                             <LogoutIcon fontSize="small" />
                         </IconButton>
                     </Typography>
-                    {balance && balance?.length && <Typography variant="body1">
-                        {`Your balance : ${balance} DAIx`}
+                    {balance && balance?.length && daiBalance && <Typography variant="body1">
+                        {`Your balance : ${balance} wei-DAIx, ${daiBalance} wei-DAI`}
                         { user && safeSigner && <IconButton aria-label="delete" size="small" 
-                            onClick={(async () => {
-                                setBalance(await getBalance(safeSigner, user.gnosisSafeAddress))
-                            })}>
+                            onClick={() => {
+                                refreshBalance()
+                            }}>
                             <RefreshIcon fontSize="small" />
                             </IconButton> 
                         }

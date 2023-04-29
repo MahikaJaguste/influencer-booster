@@ -86,6 +86,7 @@ async function main() {
 
     // minting test DAI
     await dai.mint(admin.address, thousandEther)
+    await dai.mint("0x14b33B6e371eC5e92F0134e5cB56Cc4dB1a6aF5B", thousandEther)
     // await dai.transfer(gnosisSafe.address, thousandEther)
 
     let oracle = await OracleFunctionsConsumer.deploy(flowRate1, flowRate2)

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import * as ethers from 'ethers'
 import { IDeal, IUser } from '@/firebase/types';
 import { AcceptDeal, UpdateDeal, InitDeal } from '@/firebase/crud';
@@ -26,7 +26,6 @@ export default function DealAccept({
     const [tweetId, setTweetId] = useState<string>('')
 
     async function verifyTweet(tweetId: string, influencerTwitterHandle: string, twitterHandle: string): Promise<boolean> {
-        return true;
 
         if(process.env.NEXT_PUBLIC_RAPID_API_KEY == undefined) {
             alert('Please set RAPID_API_KEY in .env.local')
@@ -113,6 +112,7 @@ export default function DealAccept({
         await InitDeal(tweetId, deal.id)
         setDeal(undefined)
         setIsLoading(false)
+        alert('Deal started successfully')
     }
 
 
