@@ -1,9 +1,11 @@
 export interface ICreateDealRequest {
     enterprise: string;
     influencer: string;
+    influencerTwitterHandle: string;
     flowRate: number;
     paymentPlan: number,
     durationSeconds: number;
+    twitterHandle: string;
 }
 
 export interface ICreateUserRequest {
@@ -20,11 +22,13 @@ export interface IDeal {
     id: string;
     enterprise: string;
     influencer: string;
+    influencerTwitterHandle: string;
     flowRate: number;
     paymentPlan: number,
     durationSeconds: number;
+    twitterHandle: string;
     status: DealStatusEnum;
-    unqiueCode: string;
+    uniqueCode: string;
     createdAt: Date;
     updatedAt: Date;
 }

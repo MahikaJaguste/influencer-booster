@@ -35,9 +35,11 @@ export async function CreateDeal(
         flowRate,
         paymentPlan,
         durationSeconds,
+        twitterHandle,
+        influencerTwitterHandle
     } = data;
 
-    const unqiueCode = nanoid(6);
+    const uniqueCode = nanoid(6);
 
 	await addDoc(ref, {
 		enterprise,
@@ -45,8 +47,10 @@ export async function CreateDeal(
         flowRate,
         paymentPlan,
         durationSeconds,
+        twitterHandle,
+        influencerTwitterHandle,
         status: DealStatusEnum.EnterpriseApproved,
-        unqiueCode,
+        uniqueCode,
 		createdAt: new Date(),
 		updatedAt: new Date(),
 	}).then((deal_) => {
@@ -69,7 +73,7 @@ export async function CreateDeal(
 }
 
 export async function AcceptDeal(
-    unqiueCode: string,
+    uniqueCode: string,
     influencerSafeAddress: string,
 ): Promise<IDeal| null> {
 
@@ -79,7 +83,8 @@ export async function AcceptDeal(
     const q1 = query(
 		ref,
 		where("influencer", "==", influencerSafeAddress),
-        where("unqiueCode", "==", unqiueCode),
+        where("uniqueCode", "==", uniqueCode),
+        where("status", "==", DealStatusEnum.EnterpriseApproved),
 	);
 
 	let result: IDeal[] = [];
@@ -91,11 +96,13 @@ export async function AcceptDeal(
 		result.push({
 			enterprise: data.enterprise,
             influencer: data.influencer,
+            influencerTwitterHandle: data.influencerTwitterHandle,
             flowRate: data.flowRate,
             paymentPlan: data.paymentPlan,
             durationSeconds: data.durationSeconds,
+            twitterHandle: data.twitterHandle,
             status: data.status,
-            unqiueCode: data.unqiueCode,
+            uniqueCode: data.uniqueCode,
             createdAt: data.createdAt,
             updatedAt: data.updatedAt,
             id: doc.id,
@@ -111,14 +118,23 @@ export async function InitDeal(
     tweetId: string,
     dealId: string,
 ) {
-    console.log("eh")
     const collectionName = "deals";
     const ref = collection(db, collectionName);
-    console.log("tweetId", tweetId);
-    console.log("dealId", dealId);
     await updateDoc(doc(ref, dealId), {
         tweetId: tweetId,
         status: DealStatusEnum.DealStarted,
+        updatedAt: new Date(),
+    });
+}
+
+export async function UpdateDeal(
+    dealId: string,
+    flowRate: number,
+) {
+    const collectionName = "deals";
+    const ref = collection(db, collectionName);
+    await updateDoc(doc(ref, dealId), {
+        flowRate: flowRate,
         updatedAt: new Date(),
     });
 }

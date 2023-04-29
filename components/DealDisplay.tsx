@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
 import ethers from 'ethers'
 import { IUser } from '@/firebase/types';
-import { GetDeals } from '@/firebase/crud';
+import { GetDeals, UpdateDeal } from '@/firebase/crud';
 import { IDeal } from '@/firebase/types';
 import useDealModule from '@/hooks/useDealModule';
 import useSafeWallet from '@/hooks/useSafeWallet';
+import { DataGrid, GridValueGetterParams, GridRowParams } from "@mui/x-data-grid";
+import { Button, LinearProgress } from "@mui/material";
+import UpgradeIcon from '@mui/icons-material/Upgrade';
 
 export default function DealDisplay({
     user,
@@ -14,12 +17,8 @@ export default function DealDisplay({
     userSigner: ethers.providers.JsonRpcSigner | undefined
 }) {
 
-
-    const [influencer, setInfluencer] = useState<string>('')
-    const [flowRate, setFlowRate] = useState<number>(0)
-    const [paymentPlan, setPaymentPlan] = useState<number>(0)
-    const [durationSeconds, setDurationSeconds] = useState<number>(0)
-    const { updateDeal, getBalance } = useDealModule()
+    const [isLoading, setIsLoading] = useState<boolean>(false)
+    const { updateDeal, getBalance, getFlow } = useDealModule()
     const { getSafe } = useSafeWallet()
 
     const [deals, setDeals] = useState<IDeal[]>([])
@@ -39,8 +38,13 @@ export default function DealDisplay({
             alert('Please enter deal unique code first.')
             return
         }
+        setIsLoading(true)
         const safe = await getSafe(userSigner, deal.enterprise)
         await updateDeal(userSigner, safe, deal.influencer);
+        const flowRate = await getFlow(userSigner, safe, deal.influencer)
+        await UpdateDeal(deal.id, parseFloat(flowRate));
+        await getDeals(user)
+        setIsLoading(false)
     }
 
     async function refreshBalance() {
@@ -57,30 +61,42 @@ export default function DealDisplay({
     }, [user]);
 
 
+    const displayColumns = [
+		{ field: "uniqueCode", headerName: "Deal ID", width: 100 },
+		{ field: "enterprise", headerName: "Enterprise Safe", width: 400 },
+		{ field: "influencer", headerName: "Influencer Safe", width: 400 },
+        { field: "flowRate", headerName: "Flow Rate (per sec)", width: 150 },
+        { field: "durationSeconds", headerName: "Duration (days)", width: 150, valueGetter: (params: GridValueGetterParams) => {
+            return params.row.durationSeconds / 86400
+        }},
+		{
+			field: "attest",
+			headerName: "",
+			sortable: false,
+			width: 150,
+			renderCell: ({ row }: Partial<GridRowParams>) =>
+			<>
+				<Button style={{textTransform: 'none'}} variant="outlined" color="success" hidden={isLoading} onClick={() => updateDeal_(row)}>
+					Update &nbsp; <UpgradeIcon/>
+				</Button>
+			</>,
+		},
+	];
+
+
     return (
         <>
-            <h2>Display Deals</h2>
-            {user ? (
-                <>
-                    <p>Deals:</p>
-                    <ul>
-                        {deals.map((deal) => (
-                            <li key={deal.id}>
-                                <p>Deal ID: {deal.unqiueCode}</p>
-                                <p>Flow Rate: {deal.flowRate}</p>
-                                <p>Payment Plan: {deal.paymentPlan}</p>
-                                <p>Duration: {deal.durationSeconds}</p>
-                                <p>Influencer Safe: {deal.influencer}</p>
-                                <p>Enterprise: {deal.enterprise}</p>
-                                <p>Status: {deal.status}</p>
-                                <button onClick={() => updateDeal_(deal)}>Update Deal</button>
-                                <button onClick={() => refreshBalance()}>Refresh Balance</button>
-                            </li>
-                        ))}
-                    </ul>
-                </>
-            )
-            : <p>Sign In to start deal</p>}
+            <div>
+                <h2 style={{textAlign: "center", }}>Your currect rocking collaborations!</h2>
+                {isLoading && <LinearProgress color="success"/>}
+                <div style={{ height: 400, width: '100%' }}>
+                    <DataGrid
+                        rows={deals}
+                        columns={displayColumns}
+                    />
+                </div>
+            </div>
+        {/* <button onClick={() => refreshBalance()}>Refresh Balance</button> */}
         </>
     )
 }

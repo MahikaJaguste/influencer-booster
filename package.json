@@ -11,8 +11,13 @@
     "hardhat-deploy": "cd hardhat && npx hardhat run scripts/deploy.ts --network localhost"
   },
   "dependencies": {
+    "@emotion/react": "^11.10.8",
+    "@emotion/styled": "^11.10.8",
     "@gelatonetwork/gasless-wallet": "^0.0.4",
     "@gnosis.pm/safe-contracts": "^1.3.0",
+    "@mui/icons-material": "^5.11.16",
+    "@mui/material": "^5.12.2",
+    "@mui/x-data-grid": "^6.3.0",
     "@safe-global/auth-kit": "^0.1.1",
     "@safe-global/safe-core-sdk": "^3.3.2",
     "@safe-global/safe-ethers-lib": "^1.9.2",

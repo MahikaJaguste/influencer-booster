@@ -75,12 +75,10 @@ const useDealModule = () => {
         console.log(deal_);
     };
 
-    const getFlow = async (signer: ethers.providers.JsonRpcSigner, gnosisSafe: ethers.Contract, influencer: string): Promise<void> => {
+    const getFlow = async (signer: ethers.providers.JsonRpcSigner, gnosisSafe: ethers.Contract, influencer: string): Promise<string> => {
         const streamingModule = StreamingModule__factory.connect(deployments["streamingModule"], signer);
         const cfa = new ethers.Contract(await streamingModule.cfa(), IConstantFlowAgreementV1__factory.abi, signer);
-        console.log("cfa = ", cfa)
         const daix = new ethers.Contract(deployments["daix"], TestToken.abi, signer);
-        console.log("daix = ", daix)
         let accountFlowRate = await cfa.getFlow(daix.address, gnosisSafe.address, influencer); 
         const accountFlowRate_ = {
             deposit: accountFlowRate.deposit.toString(),
@@ -88,10 +86,10 @@ const useDealModule = () => {
             timestamp: accountFlowRate.timestamp.toString(),
             owedDeposit: accountFlowRate.owedDeposit.toString(),
         }
-        console.log(accountFlowRate_);
+        return accountFlowRate_.flowRate.toString();
     };
 
-    const getBalance = async (signer: ethers.providers.JsonRpcSigner, account: string): Promise<void> => {
+    const getBalance = async (signer: ethers.providers.JsonRpcSigner, account: string): Promise<string> => {
         await signer.sendTransaction({ to: account, value: ethers.utils.parseEther("0") });
         const daix = new ethers.Contract(
             deployments["daix"],
@@ -99,7 +97,7 @@ const useDealModule = () => {
             signer
         )
         const balance = await daix.balanceOf(account)
-        console.log("balance = ", balance.toString())
+        return balance.toString()
     };
 
     const updateDeal = async (signer: ethers.providers.JsonRpcSigner, gnosisSafe: ethers.Contract, influencer: string): Promise<void> => {
